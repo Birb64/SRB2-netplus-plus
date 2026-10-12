@@ -2,7 +2,7 @@
 //-----------------------------------------------------------------------------
 // Copyright (C) 1993-1996 by id Software, Inc.
 // Copyright (C) 1998-2000 by DooM Legacy Team.
-// Copyright (C) 1999-2019 by Sonic Team Junior.
+// Copyright (C) 1999-2024 by Sonic Team Junior.
 //
 // This program is free software distributed under the
 // terms of the GNU General Public License, version 2.
@@ -31,11 +31,13 @@
 #include "doomdef.h"
 #include "g_game.h"
 #include "m_misc.h"
+#include "m_tokenizer.h"
 #include "hu_stuff.h"
 #include "st_stuff.h"
 #include "v_video.h"
 #include "z_zone.h"
 #include "g_input.h"
+#include "i_time.h"
 #include "i_video.h"
 #include "d_main.h"
 #include "m_argv.h"
@@ -62,10 +64,8 @@ typedef off_t off64_t;
 
 #if defined(__MINGW32__) && ((__GNUC__ > 7) || (__GNUC__ == 6 && __GNUC_MINOR__ >= 3)) && (__GNUC__ < 8)
 #define PRIdS "u"
-#elif defined (_WIN32)
+#elif defined(_WIN32) && !defined(__MINGW64__)
 #define PRIdS "Iu"
-#elif defined (DJGPP)
-#define PRIdS "u"
 #else
 #define PRIdS "zu"
 #endif
@@ -102,16 +102,16 @@ typedef off_t off64_t;
 #endif
 
 static CV_PossibleValue_t screenshot_cons_t[] = {{0, "Default"}, {1, "HOME"}, {2, "SRB2"}, {3, "CUSTOM"}, {0, NULL}};
-consvar_t cv_screenshot_option = {"screenshot_option", "Default", CV_SAVE|CV_CALL, screenshot_cons_t, Screenshot_option_Onchange, 0, NULL, NULL, 0, 0, NULL};
-consvar_t cv_screenshot_folder = {"screenshot_folder", "", CV_SAVE, NULL, NULL, 0, NULL, NULL, 0, 0, NULL};
+consvar_t cv_screenshot_option = CVAR_INIT ("screenshot_option", "Default", CV_SAVE|CV_CALL, screenshot_cons_t, Screenshot_option_Onchange);
+consvar_t cv_screenshot_folder = CVAR_INIT ("screenshot_folder", "", CV_SAVE, NULL, NULL);
 
-consvar_t cv_screenshot_colorprofile = {"screenshot_colorprofile", "Yes", CV_SAVE, CV_YesNo, NULL, 0, NULL, NULL, 0, 0, NULL};
+consvar_t cv_screenshot_colorprofile = CVAR_INIT ("screenshot_colorprofile", "Yes", CV_SAVE, CV_YesNo, NULL);
 
 static CV_PossibleValue_t moviemode_cons_t[] = {{MM_GIF, "GIF"}, {MM_APNG, "aPNG"}, {MM_SCREENSHOT, "Screenshots"}, {0, NULL}};
-consvar_t cv_moviemode = {"moviemode_mode", "GIF", CV_SAVE|CV_CALL, moviemode_cons_t, Moviemode_mode_Onchange, 0, NULL, NULL, 0, 0, NULL};
+consvar_t cv_moviemode = CVAR_INIT ("moviemode_mode", "GIF", CV_SAVE|CV_CALL, moviemode_cons_t, Moviemode_mode_Onchange);
 
-consvar_t cv_movie_option = {"movie_option", "Default", CV_SAVE|CV_CALL, screenshot_cons_t, Moviemode_option_Onchange, 0, NULL, NULL, 0, 0, NULL};
-consvar_t cv_movie_folder = {"movie_folder", "", CV_SAVE, NULL, NULL, 0, NULL, NULL, 0, 0, NULL};
+consvar_t cv_movie_option = CVAR_INIT ("movie_option", "Default", CV_SAVE|CV_CALL, screenshot_cons_t, Moviemode_option_Onchange);
+consvar_t cv_movie_folder = CVAR_INIT ("movie_folder", "", CV_SAVE, NULL, NULL);
 
 static CV_PossibleValue_t zlib_mem_level_t[] = {
 	{1, "(Min Memory) 1"},
@@ -153,16 +153,21 @@ static CV_PossibleValue_t apng_delay_t[] = {
 
 // zlib memory usage is as follows:
 // (1 << (zlib_window_bits+2)) +  (1 << (zlib_level+9))
-consvar_t cv_zlib_memory = {"png_memory_level", "7", CV_SAVE, zlib_mem_level_t, NULL, 0, NULL, NULL, 0, 0, NULL};
-consvar_t cv_zlib_level = {"png_compress_level", "(Optimal) 6", CV_SAVE, zlib_level_t, NULL, 0, NULL, NULL, 0, 0, NULL};
-consvar_t cv_zlib_strategy = {"png_strategy", "Normal", CV_SAVE, zlib_strategy_t, NULL, 0, NULL, NULL, 0, 0, NULL};
-consvar_t cv_zlib_window_bits = {"png_window_size", "32k", CV_SAVE, zlib_window_bits_t, NULL, 0, NULL, NULL, 0, 0, NULL};
+consvar_t cv_zlib_memory = CVAR_INIT ("png_memory_level", "7", CV_SAVE, zlib_mem_level_t, NULL);
+consvar_t cv_zlib_level = CVAR_INIT ("png_compress_level", "(Optimal) 6", CV_SAVE, zlib_level_t, NULL);
+consvar_t cv_zlib_strategy = CVAR_INIT ("png_strategy", "Normal", CV_SAVE, zlib_strategy_t, NULL);
+consvar_t cv_zlib_window_bits = CVAR_INIT ("png_window_size", "32k", CV_SAVE, zlib_window_bits_t, NULL);
 
-consvar_t cv_zlib_memorya = {"apng_memory_level", "(Max Memory) 9", CV_SAVE, zlib_mem_level_t, NULL, 0, NULL, NULL, 0, 0, NULL};
-consvar_t cv_zlib_levela = {"apng_compress_level", "4", CV_SAVE, zlib_level_t, NULL, 0, NULL, NULL, 0, 0, NULL};
-consvar_t cv_zlib_strategya = {"apng_strategy", "RLE", CV_SAVE, zlib_strategy_t, NULL, 0, NULL, NULL, 0, 0, NULL};
-consvar_t cv_zlib_window_bitsa = {"apng_window_size", "32k", CV_SAVE, zlib_window_bits_t, NULL, 0, NULL, NULL, 0, 0, NULL};
-consvar_t cv_apng_delay = {"apng_speed", "1/2x", CV_SAVE, apng_delay_t, NULL, 0, NULL, NULL, 0, 0, NULL};
+consvar_t cv_zlib_memorya = CVAR_INIT ("apng_memory_level", "(Max Memory) 9", CV_SAVE, zlib_mem_level_t, NULL);
+consvar_t cv_zlib_levela = CVAR_INIT ("apng_compress_level", "4", CV_SAVE, zlib_level_t, NULL);
+consvar_t cv_zlib_strategya = CVAR_INIT ("apng_strategy", "RLE", CV_SAVE, zlib_strategy_t, NULL);
+consvar_t cv_zlib_window_bitsa = CVAR_INIT ("apng_window_size", "32k", CV_SAVE, zlib_window_bits_t, NULL);
+consvar_t cv_apng_delay = CVAR_INIT ("apng_speed", "1x", CV_SAVE, apng_delay_t, NULL);
+consvar_t cv_apng_downscale = CVAR_INIT ("apng_downscale", "On", CV_SAVE, CV_OnOff, NULL);
+
+#ifdef USE_APNG
+static boolean apng_downscale = false; // So nobody can do something dumb like changing cvars mid output
+#endif
 
 boolean takescreenshot = false; // Take a screenshot this tic
 
@@ -270,8 +275,8 @@ size_t FIL_ReadFileTag(char const *name, UINT8 **buffer, INT32 tag)
 	size_t count, length;
 	UINT8 *buf;
 
-	if (FIL_ReadFileOK(name))
-		handle = fopen(name, "rb");
+	//if (FIL_ReadFileOK(name))
+		handle = fopenfile(name, "rb");
 
 	if (!handle)
 		return 0;
@@ -295,6 +300,44 @@ size_t FIL_ReadFileTag(char const *name, UINT8 **buffer, INT32 tag)
 
 	*buffer = buf;
 	return length;
+}
+
+/** Makes a copy of a text file with all newlines converted into LF newlines.
+  *
+  * \param textfilename The name of the source file
+  * \param binfilename The name of the destination file
+  */
+boolean FIL_ConvertTextFileToBinary(const char *textfilename, const char *binfilename)
+{
+	FILE *textfile;
+	FILE *binfile;
+	UINT8 buffer[1024];
+	size_t count;
+	boolean success;
+
+	textfile = fopen(textfilename, "r");
+	if (!textfile)
+		return false;
+
+	binfile = fopen(binfilename, "wb");
+	if (!binfile)
+	{
+		fclose(textfile);
+		return false;
+	}
+
+	do
+	{
+		count = fread(buffer, 1, sizeof(buffer), textfile);
+		fwrite(buffer, 1, count, binfile);
+	} while (count);
+
+	success = !(ferror(textfile) || ferror(binfile));
+
+	fclose(textfile);
+	fclose(binfile);
+
+	return success;
 }
 
 /** Check if the filename exists
@@ -426,6 +469,7 @@ void Command_SaveConfig_f(void)
 		CONS_Printf(M_GetText("saveconfig <filename[.cfg]> [-silent] : save config to a file\n"));
 		return;
 	}
+
 	strcpy(tmpstr, COM_Argv(1));
 	FIL_ForceExtension(tmpstr, ".cfg");
 
@@ -525,10 +569,13 @@ void M_FirstLoadConfig(void)
 	gameconfig_loaded = true;
 
 	// reset to default player stuff
-	COM_BufAddText (va("%s \"%s\"\n",cv_skin.name,cv_defaultskin.string));
-	COM_BufAddText (va("%s \"%s\"\n",cv_playercolor.name,cv_defaultplayercolor.string));
-	COM_BufAddText (va("%s \"%s\"\n",cv_skin2.name,cv_defaultskin2.string));
-	COM_BufAddText (va("%s \"%s\"\n",cv_playercolor2.name,cv_defaultplayercolor2.string));
+	if (!dedicated)
+	{
+		COM_BufAddText (va("%s \"%s\"\n",cv_skin.name,cv_defaultskin.string));
+		COM_BufAddText (va("%s \"%s\"\n",cv_playercolor.name,cv_defaultplayercolor.string));
+		COM_BufAddText (va("%s \"%s\"\n",cv_skin2.name,cv_defaultskin2.string));
+		COM_BufAddText (va("%s \"%s\"\n",cv_playercolor2.name,cv_defaultplayercolor2.string));
+	}
 }
 
 /** Saves the game configuration.
@@ -600,12 +647,12 @@ void M_SaveConfig(const char *filename)
 		CV_SetValue(&cv_usemouse, tutorialusemouse);
 		CV_SetValue(&cv_alwaysfreelook, tutorialfreelook);
 		CV_SetValue(&cv_mousemove, tutorialmousemove);
-		CV_SetValue(&cv_analog, tutorialanalog);
+		CV_SetValue(&cv_analog[0], tutorialanalog);
 		CV_SaveVariables(f);
 		CV_Set(&cv_usemouse, cv_usemouse.defaultvalue);
 		CV_Set(&cv_alwaysfreelook, cv_alwaysfreelook.defaultvalue);
 		CV_Set(&cv_mousemove, cv_mousemove.defaultvalue);
-		CV_Set(&cv_analog, cv_analog.defaultvalue);
+		CV_Set(&cv_analog[0], cv_analog[0].defaultvalue);
 	}
 	else
 		CV_SaveVariables(f);
@@ -755,8 +802,6 @@ static void M_PNGText(png_structp png_ptr, png_infop png_info_ptr, PNG_CONST png
 	 "SDL";
 #elif defined (_WINDOWS)
 	 "DirectX";
-#elif defined (PC_DOS)
-	 "Allegro";
 #else
 	 "Unknown";
 #endif
@@ -794,7 +839,7 @@ static void M_PNGText(png_structp png_ptr, png_infop png_info_ptr, PNG_CONST png
 	else
 		snprintf(lvlttltext, 48, "Unknown");
 
-	if (gamestate == GS_LEVEL && &players[displayplayer] && players[displayplayer].mo)
+	if (gamestate == GS_LEVEL && players[displayplayer].mo)
 		snprintf(locationtxt, 40, "X:%d Y:%d Z:%d A:%d",
 			players[displayplayer].mo->x>>FRACBITS,
 			players[displayplayer].mo->y>>FRACBITS,
@@ -945,25 +990,38 @@ static inline boolean M_PNGLib(void)
 
 static void M_PNGFrame(png_structp png_ptr, png_infop png_info_ptr, png_bytep png_buf)
 {
+	png_uint_16 downscale = apng_downscale ? vid.dup : 1;
+
 	png_uint_32 pitch = png_get_rowbytes(png_ptr, png_info_ptr);
-	PNG_CONST png_uint_32 height = vid.height;
-	png_bytepp row_pointers = png_malloc(png_ptr, height* sizeof (png_bytep));
-	png_uint_32 y;
+	PNG_CONST png_uint_32 width = vid.width / downscale;
+	PNG_CONST png_uint_32 height = vid.height / downscale;
+	png_bytepp row_pointers = png_malloc(png_ptr, height * sizeof (png_bytep));
+	png_uint_32 x, y;
 	png_uint_16 framedelay = (png_uint_16)cv_apng_delay.value;
 
 	apng_frames++;
 
 	for (y = 0; y < height; y++)
 	{
-		row_pointers[y] = png_buf;
-		png_buf += pitch;
+		row_pointers[y] = malloc(pitch * sizeof(png_byte));
+		for (x = 0; x < width; x++)
+			row_pointers[y][x] = png_buf[x * downscale];
+		png_buf += pitch * (downscale * downscale);
 	}
+		//for (x = 0; x < width; x++)
+		//{
+		//	printf("%d", x);
+		//	row_pointers[y][x] = 0;
+		//}
+	/*	row_pointers[y] = calloc(1, sizeof(png_bytep));
+		png_buf += pitch * 2;
+	}*/
 
 #ifndef PNG_STATIC
 	if (aPNG_write_frame_head)
 #endif
 		aPNG_write_frame_head(apng_ptr, apng_info_ptr, row_pointers,
-			vid.width, /* width */
+			width,     /* width */
 			height,    /* height */
 			0,         /* x offset */
 			0,         /* y offset */
@@ -994,6 +1052,12 @@ static void M_PNGfix_acTL(png_structp png_ptr, png_infop png_info_ptr,
 
 static boolean M_SetupaPNG(png_const_charp filename, png_bytep pal)
 {
+	png_uint_16 downscale;
+
+	apng_downscale = (!!cv_apng_downscale.value);
+
+	downscale = apng_downscale ? vid.dup : 1;
+
 	apng_FILE = fopen(filename,"wb+"); // + mode for reading
 	if (!apng_FILE)
 	{
@@ -1044,7 +1108,7 @@ static boolean M_SetupaPNG(png_const_charp filename, png_bytep pal)
 	png_set_compression_strategy(apng_ptr, cv_zlib_strategya.value);
 	png_set_compression_window_bits(apng_ptr, cv_zlib_window_bitsa.value);
 
-	M_PNGhdr(apng_ptr, apng_info_ptr, vid.width, vid.height, pal);
+	M_PNGhdr(apng_ptr, apng_info_ptr, vid.width / downscale, vid.height / downscale, pal);
 
 	M_PNGText(apng_ptr, apng_info_ptr, true);
 
@@ -1161,12 +1225,8 @@ void M_StartMovie(void)
 	switch (cv_moviemode.value)
 	{
 		case MM_GIF:
-			if (rendermode == render_soft)
-			{
-				moviemode = M_StartMovieGIF(pathname);
-				break;
-			}
-			/* FALLTHRU */
+			moviemode = M_StartMovieGIF(pathname);
+			break;
 		case MM_APNG:
 			moviemode = M_StartMovieAPNG(pathname);
 			break;
@@ -1194,7 +1254,7 @@ void M_SaveFrame(void)
 	// paranoia: should be unnecessary without singletics
 	static tic_t oldtic = 0;
 
-	if (oldtic == I_GetTime())
+	if (oldtic == I_GetTime() && !singletics)
 		return;
 	else
 		oldtic = I_GetTime();
@@ -1577,14 +1637,14 @@ boolean M_ScreenshotResponder(event_t *ev)
 	if (dedicated || ev->type != ev_keydown)
 		return false;
 
-	ch = ev->data1;
+	ch = ev->key;
 
 	if (ch >= KEY_MOUSE1 && menuactive) // If it's not a keyboard key, then don't allow it in the menus!
 		return false;
 
-	if (ch == KEY_F8 || ch == gamecontrol[gc_screenshot][0] || ch == gamecontrol[gc_screenshot][1]) // remappable F8
+	if (ch == KEY_F8 || ch == gamecontrol[GC_SCREENSHOT][0] || ch == gamecontrol[GC_SCREENSHOT][1]) // remappable F8
 		M_ScreenShot();
-	else if (ch == KEY_F9 || ch == gamecontrol[gc_recordgif][0] || ch == gamecontrol[gc_recordgif][1]) // remappable F9
+	else if (ch == KEY_F9 || ch == gamecontrol[GC_RECORDGIF][0] || ch == gamecontrol[GC_RECORDGIF][1]) // remappable F9
 		((moviemode) ? M_StopMovie : M_StartMovie)();
 	else
 		return false;
@@ -1598,16 +1658,19 @@ boolean M_ScreenshotResponder(event_t *ev)
 // M_StartupLocale.
 // Sets up gettext to translate SRB2's strings.
 #ifdef GETTEXT
-#if defined (__unix__) || defined(__APPLE__) || defined (UNIXCOMMON)
-#define GETTEXTDOMAIN1 "/usr/share/locale"
-#define GETTEXTDOMAIN2 "/usr/local/share/locale"
-#elif defined (_WIN32)
-#define GETTEXTDOMAIN1 "."
-#endif
+	#if defined (__unix__) || defined(__APPLE__) || defined (UNIXCOMMON)
+		#define GETTEXTDOMAIN1 "/usr/share/locale"
+		#define GETTEXTDOMAIN2 "/usr/local/share/locale"
+	#elif defined (_WIN32)
+		#define GETTEXTDOMAIN1 "."
+	#endif
+#endif // GETTEXT
 
 void M_StartupLocale(void)
 {
+#ifdef GETTEXT
 	char *textdomhandle = NULL;
+#endif //GETTEXT
 
 	CONS_Printf("M_StartupLocale...\n");
 
@@ -1616,6 +1679,7 @@ void M_StartupLocale(void)
 	// Do not set numeric locale as that affects atof
 	setlocale(LC_NUMERIC, "C");
 
+#ifdef GETTEXT
 	// FIXME: global name define anywhere?
 #ifdef GETTEXTDOMAIN1
 	textdomhandle = bindtextdomain("srb2", GETTEXTDOMAIN1);
@@ -1636,8 +1700,8 @@ void M_StartupLocale(void)
 		textdomain("srb2");
 	else
 		CONS_Printf("Could not find locale text domain!\n");
+#endif //GETTEXT
 }
-#endif
 
 // ==========================================================================
 //                        MISC STRING FUNCTIONS
@@ -1783,7 +1847,7 @@ char *M_GetToken(const char *inputString)
 			|| stringToUse[startPos] == '\r'
 			|| stringToUse[startPos] == '\n'
 			|| stringToUse[startPos] == '\0'
-			|| stringToUse[startPos] == '"' // we're treating this as whitespace because SLADE likes adding it for no good reason
+			|| stringToUse[startPos] == '=' || stringToUse[startPos] == ';' // UDMF TEXTMAP.
 			|| inComment != 0)
 			&& startPos < stringLength)
 	{
@@ -1841,6 +1905,23 @@ char *M_GetToken(const char *inputString)
 		texturesToken[1] = '\0';
 		return texturesToken;
 	}
+	// Return entire string within quotes, except without the quotes.
+	else if (stringToUse[startPos] == '"')
+	{
+		endPos = ++startPos;
+		while (stringToUse[endPos] != '"' && endPos < stringLength)
+			endPos++;
+
+		texturesTokenLength = endPos++ - startPos;
+		// Assign the memory. Don't forget an extra byte for the end of the string!
+		texturesToken = (char *)Z_Malloc((texturesTokenLength+1)*sizeof(char),PU_STATIC,NULL);
+		// Copy the string.
+		M_Memcpy(texturesToken, stringToUse+startPos, (size_t)texturesTokenLength);
+		// Make the final character NUL.
+		texturesToken[texturesTokenLength] = '\0';
+
+		return texturesToken;
+	}
 
 	// Now find the end of the token. This includes several additional characters that are okay to capture as one character, but not trailing at the end of another token.
 	endPos = startPos + 1;
@@ -1851,7 +1932,7 @@ char *M_GetToken(const char *inputString)
 			&& stringToUse[endPos] != ','
 			&& stringToUse[endPos] != '{'
 			&& stringToUse[endPos] != '}'
-			&& stringToUse[endPos] != '"' // see above
+			&& stringToUse[endPos] != '=' && stringToUse[endPos] != ';' // UDMF TEXTMAP.
 			&& inComment == 0)
 			&& endPos < stringLength)
 	{
@@ -1895,6 +1976,41 @@ void M_UnGetToken(void)
 	endPos = oldendPos;
 }
 
+static tokenizer_t *globalTokenizer = NULL;
+
+void M_TokenizerOpen(const char *inputString, size_t len)
+{
+	globalTokenizer = Tokenizer_Open(inputString, len, 2);
+}
+
+void M_TokenizerClose(void)
+{
+	Tokenizer_Close(globalTokenizer);
+	globalTokenizer = NULL;
+}
+
+const char *M_TokenizerRead(UINT32 i)
+{
+	if (!globalTokenizer)
+		return NULL;
+
+	return Tokenizer_SRB2Read(globalTokenizer, i);
+}
+
+UINT32 M_TokenizerGetEndPos(void)
+{
+	if (!globalTokenizer)
+		return 0;
+
+	return Tokenizer_GetEndPos(globalTokenizer);
+}
+
+void M_TokenizerSetEndPos(UINT32 newPos)
+{
+	if (globalTokenizer)
+		Tokenizer_SetEndPos(globalTokenizer, newPos);
+}
+
 /** Count bits in a number.
   */
 UINT8 M_CountBits(UINT32 num, UINT8 size)
@@ -1920,63 +2036,6 @@ const char *GetRevisionString(void)
 	rev[7] = '\0';
 
 	return rev;
-}
-
-// Vector/matrix math
-TVector *VectorMatrixMultiply(TVector v, TMatrix m)
-{
-	static TVector ret;
-
-	ret[0] = FixedMul(v[0],m[0][0]) + FixedMul(v[1],m[1][0]) + FixedMul(v[2],m[2][0]) + FixedMul(v[3],m[3][0]);
-	ret[1] = FixedMul(v[0],m[0][1]) + FixedMul(v[1],m[1][1]) + FixedMul(v[2],m[2][1]) + FixedMul(v[3],m[3][1]);
-	ret[2] = FixedMul(v[0],m[0][2]) + FixedMul(v[1],m[1][2]) + FixedMul(v[2],m[2][2]) + FixedMul(v[3],m[3][2]);
-	ret[3] = FixedMul(v[0],m[0][3]) + FixedMul(v[1],m[1][3]) + FixedMul(v[2],m[2][3]) + FixedMul(v[3],m[3][3]);
-
-	return &ret;
-}
-
-TMatrix *RotateXMatrix(angle_t rad)
-{
-	static TMatrix ret;
-	const angle_t fa = rad>>ANGLETOFINESHIFT;
-	const fixed_t cosrad = FINECOSINE(fa), sinrad = FINESINE(fa);
-
-	ret[0][0] = FRACUNIT; ret[0][1] =       0; ret[0][2] = 0;        ret[0][3] = 0;
-	ret[1][0] =        0; ret[1][1] =  cosrad; ret[1][2] = sinrad;   ret[1][3] = 0;
-	ret[2][0] =        0; ret[2][1] = -sinrad; ret[2][2] = cosrad;   ret[2][3] = 0;
-	ret[3][0] =        0; ret[3][1] =       0; ret[3][2] = 0;        ret[3][3] = FRACUNIT;
-
-	return &ret;
-}
-
-#if 0
-TMatrix *RotateYMatrix(angle_t rad)
-{
-	static TMatrix ret;
-	const angle_t fa = rad>>ANGLETOFINESHIFT;
-	const fixed_t cosrad = FINECOSINE(fa), sinrad = FINESINE(fa);
-
-	ret[0][0] = cosrad;   ret[0][1] =        0; ret[0][2] = -sinrad;   ret[0][3] = 0;
-	ret[1][0] = 0;        ret[1][1] = FRACUNIT; ret[1][2] = 0;         ret[1][3] = 0;
-	ret[2][0] = sinrad;   ret[2][1] =        0; ret[2][2] = cosrad;    ret[2][3] = 0;
-	ret[3][0] = 0;        ret[3][1] =        0; ret[3][2] = 0;         ret[3][3] = FRACUNIT;
-
-	return &ret;
-}
-#endif
-
-TMatrix *RotateZMatrix(angle_t rad)
-{
-	static TMatrix ret;
-	const angle_t fa = rad>>ANGLETOFINESHIFT;
-	const fixed_t cosrad = FINECOSINE(fa), sinrad = FINESINE(fa);
-
-	ret[0][0] = cosrad;    ret[0][1] = sinrad;   ret[0][2] =        0; ret[0][3] = 0;
-	ret[1][0] = -sinrad;   ret[1][1] = cosrad;   ret[1][2] =        0; ret[1][3] = 0;
-	ret[2][0] = 0;         ret[2][1] = 0;        ret[2][2] = FRACUNIT; ret[2][3] = 0;
-	ret[3][0] = 0;         ret[3][1] = 0;        ret[3][2] =        0; ret[3][3] = FRACUNIT;
-
-	return &ret;
 }
 
 /** Set of functions to take in a size_t as an argument,
@@ -2020,428 +2079,9 @@ char *sizeu5(size_t num)
 	return sizeu5_buf;
 }
 
-#if defined (__GNUC__) && defined (__i386__) // from libkwave, under GPL
-// Alam: note libkwave memcpy code comes from mplayer's libvo/aclib_template.c, r699
-
-/* for small memory blocks (<256 bytes) this version is faster */
-#define small_memcpy(dest,src,n)\
-{\
-register unsigned long int dummy;\
-__asm__ __volatile__(\
-	"cld\n\t"\
-	"rep; movsb"\
-	:"=&D"(dest), "=&S"(src), "=&c"(dummy)\
-	:"0" (dest), "1" (src),"2" (n)\
-	: "memory", "cc");\
-}
-/* linux kernel __memcpy (from: /include/asm/string.h) */
-ATTRINLINE static FUNCINLINE void *__memcpy (void *dest, const void * src, size_t n)
+void *M_Memcpy(void *dest, const void *src, size_t n)
 {
-	int d0, d1, d2;
-
-	if ( n < 4 )
-	{
-		small_memcpy(dest, src, n);
-	}
-	else
-	{
-		__asm__ __volatile__ (
-			"rep ; movsl;"
-			"testb $2,%b4;"
-			"je 1f;"
-			"movsw;"
-			"1:\ttestb $1,%b4;"
-			"je 2f;"
-			"movsb;"
-			"2:"
-		: "=&c" (d0), "=&D" (d1), "=&S" (d2)
-		:"0" (n/4), "q" (n),"1" ((long) dest),"2" ((long) src)
-		: "memory");
-	}
-
-	return dest;
-}
-
-#define SSE_MMREG_SIZE 16
-#define MMX_MMREG_SIZE 8
-
-#define MMX1_MIN_LEN 0x800  /* 2K blocks */
-#define MIN_LEN 0x40  /* 64-byte blocks */
-
-/* SSE note: i tried to move 128 bytes a time instead of 64 but it
-didn't make any measureable difference. i'm using 64 for the sake of
-simplicity. [MF] */
-static /*FUNCTARGET("sse2")*/ void *sse_cpy(void * dest, const void * src, size_t n)
-{
-	void *retval = dest;
-	size_t i;
-
-	/* PREFETCH has effect even for MOVSB instruction ;) */
-	__asm__ __volatile__ (
-		"prefetchnta (%0);"
-		"prefetchnta 32(%0);"
-		"prefetchnta 64(%0);"
-		"prefetchnta 96(%0);"
-		"prefetchnta 128(%0);"
-		"prefetchnta 160(%0);"
-		"prefetchnta 192(%0);"
-		"prefetchnta 224(%0);"
-		"prefetchnta 256(%0);"
-		"prefetchnta 288(%0);"
-		: : "r" (src) );
-
-	if (n >= MIN_LEN)
-	{
-		register unsigned long int delta;
-		/* Align destinition to MMREG_SIZE -boundary */
-		delta = ((unsigned long int)dest)&(SSE_MMREG_SIZE-1);
-		if (delta)
-		{
-			delta=SSE_MMREG_SIZE-delta;
-			n -= delta;
-			small_memcpy(dest, src, delta);
-		}
-		i = n >> 6; /* n/64 */
-		n&=63;
-		if (((unsigned long)src) & 15)
-		/* if SRC is misaligned */
-		 for (; i>0; i--)
-		 {
-			__asm__ __volatile__ (
-				"prefetchnta 320(%0);"
-				"prefetchnta 352(%0);"
-				"movups (%0), %%xmm0;"
-				"movups 16(%0), %%xmm1;"
-				"movups 32(%0), %%xmm2;"
-				"movups 48(%0), %%xmm3;"
-				"movntps %%xmm0, (%1);"
-				"movntps %%xmm1, 16(%1);"
-				"movntps %%xmm2, 32(%1);"
-				"movntps %%xmm3, 48(%1);"
-			:: "r" (src), "r" (dest) : "memory");
-			src = (const unsigned char *)src + 64;
-			dest = (unsigned char *)dest + 64;
-		}
-		else
-			/*
-			   Only if SRC is aligned on 16-byte boundary.
-			   It allows to use movaps instead of movups, which required data
-			   to be aligned or a general-protection exception (#GP) is generated.
-			*/
-		 for (; i>0; i--)
-		 {
-			__asm__ __volatile__ (
-				"prefetchnta 320(%0);"
-				"prefetchnta 352(%0);"
-				"movaps (%0), %%xmm0;"
-				"movaps 16(%0), %%xmm1;"
-				"movaps 32(%0), %%xmm2;"
-				"movaps 48(%0), %%xmm3;"
-				"movntps %%xmm0, (%1);"
-				"movntps %%xmm1, 16(%1);"
-				"movntps %%xmm2, 32(%1);"
-				"movntps %%xmm3, 48(%1);"
-			:: "r" (src), "r" (dest) : "memory");
-			src = ((const unsigned char *)src) + 64;
-			dest = ((unsigned char *)dest) + 64;
-		}
-		/* since movntq is weakly-ordered, a "sfence"
-		 * is needed to become ordered again. */
-		__asm__ __volatile__ ("sfence":::"memory");
-		/* enables to use FPU */
-		__asm__ __volatile__ ("emms":::"memory");
-	}
-	/*
-	 *	Now do the tail of the block
-	 */
-	if (n) __memcpy(dest, src, n);
-	return retval;
-}
-
-static FUNCTARGET("mmx") void *mmx2_cpy(void *dest, const void *src, size_t n)
-{
-	void *retval = dest;
-	size_t i;
-
-	/* PREFETCH has effect even for MOVSB instruction ;) */
-	__asm__ __volatile__ (
-		"prefetchnta (%0);"
-		"prefetchnta 32(%0);"
-		"prefetchnta 64(%0);"
-		"prefetchnta 96(%0);"
-		"prefetchnta 128(%0);"
-		"prefetchnta 160(%0);"
-		"prefetchnta 192(%0);"
-		"prefetchnta 224(%0);"
-		"prefetchnta 256(%0);"
-		"prefetchnta 288(%0);"
-	: : "r" (src));
-
-	if (n >= MIN_LEN)
-	{
-		register unsigned long int delta;
-		/* Align destinition to MMREG_SIZE -boundary */
-		delta = ((unsigned long int)dest)&(MMX_MMREG_SIZE-1);
-		if (delta)
-		{
-			delta=MMX_MMREG_SIZE-delta;
-			n -= delta;
-			small_memcpy(dest, src, delta);
-		}
-		i = n >> 6; /* n/64 */
-		n&=63;
-		for (; i>0; i--)
-		{
-			__asm__ __volatile__ (
-				"prefetchnta 320(%0);"
-				"prefetchnta 352(%0);"
-				"movq (%0), %%mm0;"
-				"movq 8(%0), %%mm1;"
-				"movq 16(%0), %%mm2;"
-				"movq 24(%0), %%mm3;"
-				"movq 32(%0), %%mm4;"
-				"movq 40(%0), %%mm5;"
-				"movq 48(%0), %%mm6;"
-				"movq 56(%0), %%mm7;"
-				"movntq %%mm0, (%1);"
-				"movntq %%mm1, 8(%1);"
-				"movntq %%mm2, 16(%1);"
-				"movntq %%mm3, 24(%1);"
-				"movntq %%mm4, 32(%1);"
-				"movntq %%mm5, 40(%1);"
-				"movntq %%mm6, 48(%1);"
-				"movntq %%mm7, 56(%1);"
-			:: "r" (src), "r" (dest) : "memory");
-			src = ((const unsigned char *)src) + 64;
-			dest = ((unsigned char *)dest) + 64;
-		}
-		/* since movntq is weakly-ordered, a "sfence"
-		* is needed to become ordered again. */
-		__asm__ __volatile__ ("sfence":::"memory");
-		__asm__ __volatile__ ("emms":::"memory");
-	}
-	/*
-	 *	Now do the tail of the block
-	 */
-	if (n) __memcpy(dest, src, n);
-	return retval;
-}
-
-static FUNCTARGET("mmx") void *mmx1_cpy(void *dest, const void *src, size_t n) //3DNOW
-{
-	void *retval = dest;
-	size_t i;
-
-	/* PREFETCH has effect even for MOVSB instruction ;) */
-	__asm__ __volatile__ (
-		"prefetch (%0);"
-		"prefetch 32(%0);"
-		"prefetch 64(%0);"
-		"prefetch 96(%0);"
-		"prefetch 128(%0);"
-		"prefetch 160(%0);"
-		"prefetch 192(%0);"
-		"prefetch 224(%0);"
-		"prefetch 256(%0);"
-		"prefetch 288(%0);"
-	: : "r" (src));
-
-	if (n >= MMX1_MIN_LEN)
-	{
-		register unsigned long int delta;
-		/* Align destinition to MMREG_SIZE -boundary */
-		delta = ((unsigned long int)dest)&(MMX_MMREG_SIZE-1);
-		if (delta)
-		{
-			delta=MMX_MMREG_SIZE-delta;
-			n -= delta;
-			small_memcpy(dest, src, delta);
-		}
-		i = n >> 6; /* n/64 */
-		n&=63;
-		for (; i>0; i--)
-		{
-			__asm__ __volatile__ (
-				"prefetch 320(%0);"
-				"prefetch 352(%0);"
-				"movq (%0), %%mm0;"
-				"movq 8(%0), %%mm1;"
-				"movq 16(%0), %%mm2;"
-				"movq 24(%0), %%mm3;"
-				"movq 32(%0), %%mm4;"
-				"movq 40(%0), %%mm5;"
-				"movq 48(%0), %%mm6;"
-				"movq 56(%0), %%mm7;"
-				"movq %%mm0, (%1);"
-				"movq %%mm1, 8(%1);"
-				"movq %%mm2, 16(%1);"
-				"movq %%mm3, 24(%1);"
-				"movq %%mm4, 32(%1);"
-				"movq %%mm5, 40(%1);"
-				"movq %%mm6, 48(%1);"
-				"movq %%mm7, 56(%1);"
-			:: "r" (src), "r" (dest) : "memory");
-			src = ((const unsigned char *)src) + 64;
-			dest = ((unsigned char *)dest) + 64;
-		}
-		__asm__ __volatile__ ("femms":::"memory"); // same as mmx_cpy() but with a femms
-	}
-	/*
-	 *	Now do the tail of the block
-	 */
-	if (n) __memcpy(dest, src, n);
-	return retval;
-}
-#endif
-
-// Alam: why? memcpy may be __cdecl/_System and our code may be not the same type
-static void *cpu_cpy(void *dest, const void *src, size_t n)
-{
-	if (src == NULL)
-	{
-		CONS_Debug(DBG_MEMORY, "Memcpy from 0x0?!: %p %p %s\n", dest, src, sizeu1(n));
-		return dest;
-	}
-
-	if(dest == NULL)
-	{
-		CONS_Debug(DBG_MEMORY, "Memcpy to 0x0?!: %p %p %s\n", dest, src, sizeu1(n));
-		return dest;
-	}
-
 	return memcpy(dest, src, n);
-}
-
-static /*FUNCTARGET("mmx")*/ void *mmx_cpy(void *dest, const void *src, size_t n)
-{
-#if defined (_MSC_VER) && defined (_X86_)
-	_asm
-	{
-		mov ecx, [n]
-		mov esi, [src]
-		mov edi, [dest]
-		shr ecx, 6 // mit mmx: 64bytes per iteration
-		jz lower_64 // if lower than 64 bytes
-		loop_64: // MMX transfers multiples of 64bytes
-		movq mm0,  0[ESI] // read sources
-		movq mm1,  8[ESI]
-		movq mm2, 16[ESI]
-		movq mm3, 24[ESI]
-		movq mm4, 32[ESI]
-		movq mm5, 40[ESI]
-		movq mm6, 48[ESI]
-		movq mm7, 56[ESI]
-
-		movq  0[EDI], mm0 // write destination
-		movq  8[EDI], mm1
-		movq 16[EDI], mm2
-		movq 24[EDI], mm3
-		movq 32[EDI], mm4
-		movq 40[EDI], mm5
-		movq 48[EDI], mm6
-		movq 56[EDI], mm7
-
-		add esi, 64
-		add edi, 64
-		dec ecx
-		jnz loop_64
-		emms // close mmx operation
-		lower_64:// transfer rest of buffer
-		mov ebx,esi
-		sub ebx,src
-		mov ecx,[n]
-		sub ecx,ebx
-		shr ecx, 3 // multiples of 8 bytes
-		jz lower_8
-		loop_8:
-		movq  mm0, [esi] // read source
-		movq [edi], mm0 // write destination
-		add esi, 8
-		add edi, 8
-		dec ecx
-		jnz loop_8
-		emms // close mmx operation
-		lower_8:
-		mov ebx,esi
-		sub ebx,src
-		mov ecx,[n]
-		sub ecx,ebx
-		rep movsb
-		mov eax, [dest] // return dest
-	}
-#elif defined (__GNUC__) && defined (__i386__)
-	void *retval = dest;
-	size_t i;
-
-	if (n >= MMX1_MIN_LEN)
-	{
-		register unsigned long int delta;
-		/* Align destinition to MMREG_SIZE -boundary */
-		delta = ((unsigned long int)dest)&(MMX_MMREG_SIZE-1);
-		if (delta)
-		{
-			delta=MMX_MMREG_SIZE-delta;
-			n -= delta;
-			small_memcpy(dest, src, delta);
-		}
-		i = n >> 6; /* n/64 */
-		n&=63;
-		for (; i>0; i--)
-		{
-			__asm__ __volatile__ (
-				"movq (%0), %%mm0;"
-				"movq 8(%0), %%mm1;"
-				"movq 16(%0), %%mm2;"
-				"movq 24(%0), %%mm3;"
-				"movq 32(%0), %%mm4;"
-				"movq 40(%0), %%mm5;"
-				"movq 48(%0), %%mm6;"
-				"movq 56(%0), %%mm7;"
-				"movq %%mm0, (%1);"
-				"movq %%mm1, 8(%1);"
-				"movq %%mm2, 16(%1);"
-				"movq %%mm3, 24(%1);"
-				"movq %%mm4, 32(%1);"
-				"movq %%mm5, 40(%1);"
-				"movq %%mm6, 48(%1);"
-				"movq %%mm7, 56(%1);"
-			:: "r" (src), "r" (dest) : "memory");
-			src = ((const unsigned char *)src) + 64;
-			dest = ((unsigned char *)dest) + 64;
-		}
-		__asm__ __volatile__ ("emms":::"memory");
-	}
-	/*
-	 *	Now do the tail of the block
-	 */
-	if (n) __memcpy(dest, src, n);
-	return retval;
-#else
-	return cpu_cpy(dest, src, n);
-#endif
-}
-
-void *(*M_Memcpy)(void* dest, const void* src, size_t n) = cpu_cpy;
-
-/** Memcpy that uses MMX, 3DNow, MMXExt or even SSE
-  * Do not use on overlapped memory, use memmove for that
-  */
-void M_SetupMemcpy(void)
-{
-#if defined (__GNUC__) && defined (__i386__)
-	if (R_SSE2)
-		M_Memcpy = sse_cpy;
-	else if (R_MMXExt)
-		M_Memcpy = mmx2_cpy;
-	else if (R_3DNow)
-		M_Memcpy = mmx1_cpy;
-	else
-#endif
-	if (R_MMX)
-		M_Memcpy = mmx_cpy;
-#if 0
-	M_Memcpy = cpu_cpy;
-#endif
 }
 
 /** Return the appropriate message for a file error or end of file.
@@ -2452,4 +2092,223 @@ const char *M_FileError(FILE *fp)
 		return strerror(errno);
 	else
 		return "end-of-file";
+}
+
+/** Return the number of parts of this path.
+*/
+int M_PathParts(const char *path)
+{
+	int n;
+	const char *p;
+	const char *t;
+	if (path == NULL)
+		return 0;
+	for (n = 0, p = path ;; ++n)
+	{
+		t = p;
+		if (( p = strchr(p, PATHSEP[0]) ))
+			p += strspn(p, PATHSEP);
+		else
+		{
+			if (*t)/* there is something after the final delimiter */
+				n++;
+			break;
+		}
+	}
+	return n;
+}
+
+/** Check whether a path is an absolute path.
+*/
+boolean M_IsPathAbsolute(const char *path)
+{
+#ifdef _WIN32
+	return ( strncmp(&path[1], ":\\", 2) == 0 );
+#else
+	return ( path[0] == '/' );
+#endif
+}
+
+/** I_mkdir for each part of the path.
+*/
+void M_MkdirEachUntil(const char *cpath, int start, int end, int mode)
+{
+	char path[MAX_WADPATH];
+	char *p;
+	char *t;
+
+	if (end > 0 && end <= start)
+		return;
+
+	strlcpy(path, cpath, sizeof path);
+#ifdef _WIN32
+	if (strncmp(&path[1], ":\\", 2) == 0)
+		p = &path[3];
+	else
+#endif
+		p = path;
+
+	if (end > 0)
+		end -= start;
+
+	for (; start > 0; --start)
+	{
+		p += strspn(p, PATHSEP);
+		if (!( p = strchr(p, PATHSEP[0]) ))
+			return;
+	}
+	p += strspn(p, PATHSEP);
+	for (;;)
+	{
+		if (end > 0 && !--end)
+			break;
+
+		t = p;
+		if (( p = strchr(p, PATHSEP[0]) ))
+		{
+			*p = '\0';
+			I_mkdir(path, mode);
+			*p = PATHSEP[0];
+			p += strspn(p, PATHSEP);
+		}
+		else
+		{
+			if (*t)
+				I_mkdir(path, mode);
+			break;
+		}
+	}
+}
+
+void M_MkdirEach(const char *path, int start, int mode)
+{
+	M_MkdirEachUntil(path, start, -1, mode);
+}
+
+int M_JumpWord(const char *line)
+{
+	int c;
+
+	c = line[0];
+
+	if (isspace(c))
+		return strspn(line, " ");
+	else if (ispunct(c))
+		return strspn(line, PUNCTUATION);
+	else
+	{
+		if (isspace(line[1]))
+			return 1 + strspn(&line[1], " ");
+		else
+			return strcspn(line, " "PUNCTUATION);
+	}
+}
+
+int M_JumpWordReverse(const char *line, int offset)
+{
+	int (*is)(int);
+	int c;
+	if (offset == 0) // Don't let "--offset" later result in a negative value
+		return 0;
+	c = line[--offset];
+	if (isspace(c))
+		is = isspace;
+	else if (ispunct(c))
+		is = ispunct;
+	else
+		is = isalnum;
+	c = (*is)(line[offset]);
+	while (offset > 0 &&
+			(*is)(line[offset - 1]) == c)
+		offset--;
+	return offset;
+}
+
+const char * M_Ftrim (double f)
+{
+	static char dig[9];/* "0." + 6 digits (6 is printf's default) */
+	int i;
+	/* I know I said it's the default, but just in case... */
+	sprintf(dig, "%.6f", fabs(modf(f, &f)));
+	/* trim trailing zeroes */
+	for (i = strlen(dig)-1; dig[i] == '0'; --i)
+		;
+	if (dig[i] == '.')/* :NOTHING: */
+		return "";
+	else
+	{
+		dig[i + 1] = '\0';
+		return &dig[1];/* skip the 0 */
+	}
+}
+
+// Returns true if the string is empty.
+boolean M_IsStringEmpty(const char *s)
+{
+	const char *ch = s;
+
+	if (s == NULL || s[0] == '\0')
+		return true;
+
+	for (;;ch++)
+	{
+		if (!(*ch))
+			break;
+		if (!isspace((*ch)))
+			return false;
+	}
+
+	return true;
+}
+
+// Converts a string containing a whole number into an int. Returns false if the conversion failed.
+boolean M_StringToNumber(const char *input, int *out)
+{
+	char *end_position = NULL;
+
+	errno = 0;
+
+	int result = strtol(input, &end_position, 10);
+	if (end_position == input || *end_position != '\0')
+		return false;
+
+	if (errno == ERANGE)
+		return false;
+
+	*out = result;
+
+	return true;
+}
+
+// Converts a string containing a number into a double. Returns false if the conversion failed.
+boolean M_StringToDecimal(const char *input, double *out)
+{
+	char *end_position = NULL;
+
+	errno = 0;
+
+	double result = strtod(input, &end_position);
+	if (end_position == input || *end_position != '\0')
+		return false;
+
+	if (errno == ERANGE)
+		return false;
+
+	*out = result;
+
+	return true;
+}
+
+// Rounds off floating numbers and checks for 0 - 255 bounds
+int M_RoundUp(double number)
+{
+	if (number > 255.0l)
+		return 255;
+	if (number < 0.0l)
+		return 0;
+
+	if ((int)number <= (int)(number - 0.5f))
+		return (int)number + 1;
+
+	return (int)number;
 }

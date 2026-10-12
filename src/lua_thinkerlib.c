@@ -1,7 +1,7 @@
 // SONIC ROBO BLAST 2
 //-----------------------------------------------------------------------------
 // Copyright (C) 2012-2016 by John "JTE" Muniz.
-// Copyright (C) 2012-2019 by Sonic Team Junior.
+// Copyright (C) 2012-2023 by Sonic Team Junior.
 //
 // This program is free software distributed under the
 // terms of the GNU General Public License, version 2.
@@ -11,7 +11,6 @@
 /// \brief thinker library for Lua scripting
 
 #include "doomdef.h"
-#ifdef HAVE_BLUA
 #include "p_local.h"
 #include "lua_script.h"
 #include "lua_libs.h"
@@ -45,7 +44,7 @@ static int iterationState_gc(lua_State *L)
 }
 
 #define push_thinker(th) {\
-	if ((th)->function.acp1 == (actionf_p1)P_MobjThinker) \
+	if ((th)->function == (actionf_p1)P_MobjThinker) \
 		LUA_PushUserdata(L, (th), META_MOBJ); \
 	else \
 		lua_pushlightuserdata(L, (th)); \
@@ -94,7 +93,7 @@ static int lib_iterateThinkers(lua_State *L)
 		return luaL_error(L, "next thinker invalidated during iteration");
 
 	for (; next != &thlist[THINK_MOBJ]; next = next->next)
-		if (!it->filter || next->function.acp1 == it->filter)
+		if (!it->filter || next->function == it->filter)
 		{
 			push_thinker(next);
 			if (next->next != &thlist[THINK_MOBJ])
@@ -128,8 +127,7 @@ static int lib_startIterate(lua_State *L)
 int LUA_ThinkerLib(lua_State *L)
 {
 	luaL_newmetatable(L, META_ITERATIONSTATE);
-	lua_pushcfunction(L, iterationState_gc);
-	lua_setfield(L, -2, "__gc");
+	LUA_SetCFunctionField(L, "__gc", iterationState_gc);
 	lua_pop(L, 1);
 
 	lua_createtable(L, 0, 1);
@@ -139,5 +137,3 @@ int LUA_ThinkerLib(lua_State *L)
 	lua_setglobal(L, "mobjs");
 	return 0;
 }
-
-#endif

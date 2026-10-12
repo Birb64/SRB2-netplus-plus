@@ -2,7 +2,7 @@
 //-----------------------------------------------------------------------------
 // Copyright (C) 1993-1996 by id Software, Inc.
 // Copyright (C) 1998-2000 by DooM Legacy Team.
-// Copyright (C) 1999-2019 by Sonic Team Junior.
+// Copyright (C) 1999-2024 by Sonic Team Junior.
 //
 // This program is free software distributed under the
 // terms of the GNU General Public License, version 2.
@@ -38,7 +38,7 @@ extern UINT32 op_displayflags;
 
 boolean OP_FreezeObjectplace(void);
 void OP_ResetObjectplace(void);
-void OP_NightsObjectplace(player_t *player);
+//void OP_NightsObjectplace(player_t *player);
 void OP_ObjectplaceMovement(player_t *player);
 
 //
@@ -68,7 +68,7 @@ void Command_Toggletwod_f(void);
 #ifdef _DEBUG
 void Command_CauseCfail_f(void);
 #endif
-#if defined(HAVE_BLUA) && defined(LUA_ALLOW_BYTECODE)
+#ifdef LUA_ALLOW_BYTECODE
 void Command_Dumplua_f(void);
 #endif
 

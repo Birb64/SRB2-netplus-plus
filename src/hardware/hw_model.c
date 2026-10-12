@@ -10,12 +10,14 @@
 #include "../doomdef.h"
 #include "../doomtype.h"
 #include "../info.h"
+#include "../r_skins.h"
+#include "../r_state.h"
 #include "../z_zone.h"
 #include "hw_model.h"
 #include "hw_md2load.h"
 #include "hw_md3load.h"
 #include "hw_md2.h"
-#include "u_list.h"
+#include "../u_list.h"
 #include <string.h>
 
 static float PI = (3.1415926535897932384626433832795f);
@@ -141,9 +143,7 @@ tag_t *GetTagByName(model_t *model, char *name, int frame)
 //
 // LoadModel
 //
-// Load a model and
-// convert it to the
-// internal format.
+// Load a model and convert it to the internal format.
 //
 model_t *LoadModel(const char *filename, int ztag)
 {
@@ -193,9 +193,6 @@ model_t *LoadModel(const char *filename, int ztag)
 		return NULL;
 	}
 
-	model->mdlFilename = (char*)Z_Malloc(strlen(filename)+1, ztag, 0);
-	strcpy(model->mdlFilename, filename);
-
 	Optimize(model);
 	GeneratePolygonNormals(model, ztag);
 	LoadModelSprite2(model);
@@ -221,21 +218,31 @@ model_t *LoadModel(const char *filename, int ztag)
 		material->shininess = 25.0f;
 	}
 
+	// Set originaluvs to point to uvs
+	for (i = 0; i < model->numMeshes; i++)
+		model->meshes[i].originaluvs = model->meshes[i].uvs;
+
+	model->max_s = 1.0;
+	model->max_t = 1.0;
+	model->vbo_max_s = 1.0;
+	model->vbo_max_t = 1.0;
+
 	return model;
 }
 
 void HWR_ReloadModels(void)
 {
 	size_t i;
-	INT32 s;
 
-	for (s = 0; s < MAXSKINS; s++)
+	HWR_LoadModels();
+
+	for (i = 0; i < md2_numplayermodels; i++)
 	{
-		if (md2_playermodels[s].model)
-			LoadModelSprite2(md2_playermodels[s].model);
+		if (md2_playermodels[i].model)
+			LoadModelSprite2(md2_playermodels[i].model);
 	}
 
-	for (i = 0; i < NUMSPRITES; i++)
+	for (i = 0; i < numsprites; i++)
 	{
 		if (md2_models[i].model)
 			LoadModelInterpolationSettings(md2_models[i].model);
@@ -246,7 +253,7 @@ void LoadModelInterpolationSettings(model_t *model)
 {
 	INT32 i;
 	INT32 numframes = model->meshes[0].numFrames;
-	char *framename = model->framenames;
+	char *framename = model->frameNames;
 
 	if (!framename)
 		return;
@@ -285,8 +292,9 @@ void LoadModelSprite2(model_t *model)
 {
 	INT32 i;
 	modelspr2frames_t *spr2frames = NULL;
+	modelspr2frames_t *superspr2frames = NULL;
 	INT32 numframes = model->meshes[0].numFrames;
-	char *framename = model->framenames;
+	char *framename = model->frameNames;
 
 	if (!framename)
 		return;
@@ -328,25 +336,33 @@ void LoadModelSprite2(model_t *model)
 				spr2idx = 0;
 				while (spr2idx < free_spr2)
 				{
+					modelspr2frames_t *frames = NULL;
 					if (!memcmp(spr2names[spr2idx], name, 4))
 					{
 						if (!spr2frames)
-							spr2frames = (modelspr2frames_t*)Z_Calloc(sizeof(modelspr2frames_t)*NUMPLAYERSPRITES*2, PU_STATIC, NULL);
+							spr2frames = (modelspr2frames_t*)Z_Calloc(sizeof(modelspr2frames_t)*NUMPLAYERSPRITES, PU_STATIC, NULL);
+						frames = spr2frames;
+
 						if (super)
-							spr2idx |= FF_SPR2SUPER;
+						{
+							if (!superspr2frames)
+								superspr2frames = (modelspr2frames_t*)Z_Calloc(sizeof(modelspr2frames_t)*NUMPLAYERSPRITES, PU_STATIC, NULL);
+							frames = superspr2frames;
+						}
+
 						if (framechars[0])
 						{
 							frame = atoi(framechars);
-							if (spr2frames[spr2idx].numframes < frame+1)
-								spr2frames[spr2idx].numframes = frame+1;
+							if (frames[spr2idx].numframes < frame+1)
+								frames[spr2idx].numframes = frame+1;
 						}
 						else
 						{
-							frame = spr2frames[spr2idx].numframes;
-							spr2frames[spr2idx].numframes++;
+							frame = frames[spr2idx].numframes;
+							frames[spr2idx].numframes++;
 						}
-						spr2frames[spr2idx].frames[frame] = i;
-						spr2frames[spr2idx].interpolate = interpolate;
+						frames[spr2idx].frames[frame] = i;
+						frames[spr2idx].interpolate = interpolate;
 						break;
 					}
 					spr2idx++;
@@ -359,7 +375,10 @@ void LoadModelSprite2(model_t *model)
 
 	if (model->spr2frames)
 		Z_Free(model->spr2frames);
+	if (model->superspr2frames)
+		Z_Free(model->superspr2frames);
 	model->spr2frames = spr2frames;
+	model->superspr2frames = superspr2frames;
 }
 
 //
@@ -663,6 +682,9 @@ void GeneratePolygonNormals(model_t *model, int ztag)
 
 			for (k = 0; k < mesh->numTriangles; k++)
 			{
+				/// TODO: normalize vectors
+				(void)vertices;
+				(void)polyNormals;
 //				Vector::Normal(vertices, polyNormals);
 				vertices += 3 * 3;
 				polyNormals++;

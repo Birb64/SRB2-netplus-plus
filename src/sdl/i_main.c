@@ -20,10 +20,15 @@
 #include "../doomdef.h"
 #include "../m_argv.h"
 #include "../d_main.h"
+#include "../m_misc.h"/* path shit */
 #include "../i_system.h"
 
-#ifdef __GNUC__
+#if defined (__GNUC__) || defined (__unix__)
 #include <unistd.h>
+#endif
+
+#if defined (__unix__) || defined(__APPLE__) || defined (UNIXCOMMON)
+#include <errno.h>
 #endif
 
 #include "time.h" // For log timestamps
@@ -36,7 +41,7 @@
 #endif
 
 #if defined (_WIN32) && !defined (main)
-//#define SDLMAIN
+#define SDLMAIN
 #endif
 
 #ifdef SDLMAIN
@@ -47,6 +52,7 @@ extern int SDL_main(int argc, char *argv[]);
 
 #ifdef LOGMESSAGES
 FILE *logstream = NULL;
+char logfilename[1024];
 #endif
 
 #ifndef DOXYGEN
@@ -64,36 +70,90 @@ FILE *logstream = NULL;
 typedef BOOL (WINAPI *p_IsDebuggerPresent)(VOID);
 #endif
 
-#if defined (_WIN32)
-static inline VOID MakeCodeWritable(VOID)
+#ifdef LOGMESSAGES
+static void InitLogging(void)
 {
-#ifdef USEASM // Disable write-protection of code segment
-	DWORD OldRights;
-	const DWORD NewRights = PAGE_EXECUTE_READWRITE;
-	PBYTE pBaseOfImage = (PBYTE)GetModuleHandle(NULL);
-	PIMAGE_DOS_HEADER dosH =(PIMAGE_DOS_HEADER)pBaseOfImage;
-	PIMAGE_NT_HEADERS ntH = (PIMAGE_NT_HEADERS)(pBaseOfImage + dosH->e_lfanew);
-	PIMAGE_OPTIONAL_HEADER oH = (PIMAGE_OPTIONAL_HEADER)
-		((PBYTE)ntH + sizeof (IMAGE_NT_SIGNATURE) + sizeof (IMAGE_FILE_HEADER));
-	LPVOID pA = pBaseOfImage+oH->BaseOfCode;
-	SIZE_T pS = oH->SizeOfCode;
-#if 1 // try to find the text section
-	PIMAGE_SECTION_HEADER ntS = IMAGE_FIRST_SECTION (ntH);
-	WORD s;
-	for (s = 0; s < ntH->FileHeader.NumberOfSections; s++)
-	{
-		if (memcmp (ntS[s].Name, ".text\0\0", 8) == 0)
-		{
-			pA = pBaseOfImage+ntS[s].VirtualAddress;
-			pS = ntS[s].Misc.VirtualSize;
-			break;
-		}
-	}
+	const char *logdir = NULL;
+	time_t my_time;
+	struct tm * timeinfo;
+	const char *format;
+	const char *reldir;
+	int left;
+	boolean fileabs;
+#if defined (__unix__) || defined(__APPLE__) || defined (UNIXCOMMON)
+	const char *link;
 #endif
 
-	if (!VirtualProtect(pA,pS,NewRights,&OldRights))
-		I_Error("Could not make code writable\n");
-#endif
+	logdir = D_Home();
+
+	my_time = time(NULL);
+	timeinfo = localtime(&my_time);
+
+	if (M_CheckParm("-logfile") && M_IsNextParm())
+	{
+		format = M_GetNextParm();
+		fileabs = M_IsPathAbsolute(format);
+	}
+	else
+	{
+		format = "log-%Y-%m-%d_%H-%M-%S.txt";
+		fileabs = false;
+	}
+
+	if (fileabs)
+	{
+		strftime(logfilename, sizeof logfilename, format, timeinfo);
+	}
+	else
+	{
+		if (M_CheckParm("-logdir") && M_IsNextParm())
+			reldir = M_GetNextParm();
+		else
+			reldir = "logs";
+
+		if (M_IsPathAbsolute(reldir))
+		{
+			left = snprintf(logfilename, sizeof logfilename,
+					"%s"PATHSEP, reldir);
+		}
+		else
+#ifdef DEFAULTDIR
+		if (logdir)
+		{
+			left = snprintf(logfilename, sizeof logfilename,
+					"%s"PATHSEP DEFAULTDIR PATHSEP"%s"PATHSEP, logdir, reldir);
+		}
+		else
+#endif/*DEFAULTDIR*/
+		{
+			left = snprintf(logfilename, sizeof logfilename,
+					"."PATHSEP"%s"PATHSEP, reldir);
+		}
+
+		strftime(&logfilename[left], sizeof logfilename - left,
+				format, timeinfo);
+	}
+
+	M_MkdirEachUntil(logfilename,
+			M_PathParts(logdir) - 1,
+			M_PathParts(logfilename) - 1, 0755);
+
+#if defined (__unix__) || defined(__APPLE__) || defined (UNIXCOMMON)
+	logstream = fopen(logfilename, "w");
+#ifdef DEFAULTDIR
+	if (logdir)
+		link = va("%s/"DEFAULTDIR"/latest-log.txt", logdir);
+	else
+#endif/*DEFAULTDIR*/
+		link = "latest-log.txt";
+	unlink(link);
+	if (symlink(logfilename, link) == -1)
+	{
+		I_OutputMsg("Error symlinking latest-log.txt: %s\n", strerror(errno));
+	}
+#else/*defined (__unix__) || defined(__APPLE__) || defined (UNIXCOMMON)*/
+	logstream = fopen("latest-log.txt", "wt+");
+#endif/*defined (__unix__) || defined(__APPLE__) || defined (UNIXCOMMON)*/
 }
 #endif
 
@@ -115,8 +175,6 @@ int SDL_main(int argc, char **argv)
 int main(int argc, char **argv)
 #endif
 {
-	const char *logdir = NULL;
-	char logfile[MAX_WADPATH];
 	myargc = argc;
 	myargv = argv; /// \todo pull out path to exe from this string
 
@@ -128,37 +186,13 @@ int main(int argc, char **argv)
 #endif
 #endif
 
+	// disable text input right off the bat, since we don't need it at the start.
+	I_SetTextInputMode(false);
+
 #ifdef LOGMESSAGES
 	if (!M_CheckParm("-nolog"))
-	{
-		time_t my_time;
-		struct tm * timeinfo;
-		char buf[26];
-
-		logdir = D_Home();
-
-		my_time = time(NULL);
-		timeinfo = localtime(&my_time);
-
-		strftime(buf, 26, "%Y-%m-%d %H-%M-%S", timeinfo);
-		strcpy(logfile, va("log-%s.txt", buf));
-
-#ifdef DEFAULTDIR
-		if (logdir)
-		{
-			// Create dirs here because D_SRB2Main() is too late.
-			I_mkdir(va("%s%s"DEFAULTDIR, logdir, PATHSEP), 0755);
-			I_mkdir(va("%s%s"DEFAULTDIR"%slogs",logdir, PATHSEP, PATHSEP), 0755);
-			logstream = fopen(va("%s%s"DEFAULTDIR"%slogs%s%s",logdir, PATHSEP, PATHSEP, PATHSEP, logfile), "wt");
-		}
-		else
-#endif
-		{
-			I_mkdir("."PATHSEP"logs"PATHSEP, 0755);
-			logstream = fopen(va("."PATHSEP"logs"PATHSEP"%s", logfile), "wt");
-		}
-	}
-#endif
+		InitLogging();
+#endif/*LOGMESSAGES*/
 
 	//I_OutputMsg("I_StartupSystem() ...\n");
 	I_StartupSystem();
@@ -179,14 +213,14 @@ int main(int argc, char **argv)
 #ifndef __MINGW32__
 	prevExceptionFilter = SetUnhandledExceptionFilter(RecordExceptionInfo);
 #endif
-	MakeCodeWritable();
 #endif
+
 	// startup SRB2
 	CONS_Printf("Setting up SRB2...\n");
 	D_SRB2Main();
 #ifdef LOGMESSAGES
 	if (!M_CheckParm("-nolog"))
-		CONS_Printf("Logfile: %s\n", logfile);
+		CONS_Printf("Logfile: %s\n", logfilename);
 #endif
 	CONS_Printf("Entering main game loop...\n");
 	// never return

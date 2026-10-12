@@ -2,8 +2,8 @@
 //-----------------------------------------------------------------------------
 // Copyright (C) 1993-1996 by id Software, Inc.
 // Copyright (C) 1998-2000 by DooM Legacy Team.
-// Copyright (C) 2011-2016 by Matthew "Inuyasha" Walsh.
-// Copyright (C) 1999-2019 by Sonic Team Junior.
+// Copyright (C) 2011-2016 by Matthew "Kaito Sinclaire" Walsh.
+// Copyright (C) 1999-2025 by Sonic Team Junior.
 //
 // This program is free software distributed under the
 // terms of the GNU General Public License, version 2.
@@ -15,10 +15,16 @@
 #ifndef __X_MENU__
 #define __X_MENU__
 
+#include "doomstat.h" // for NUMGAMETYPES
 #include "d_event.h"
 #include "command.h"
-#include "r_things.h" // for SKINNAMESIZE
 #include "f_finale.h" // for ttmode_enum
+#include "i_threads.h"
+#include "netcode/mserv.h"
+#include "r_things.h" // for SKINNAMESIZE
+
+// Compatibility with old-style named NiGHTS replay files.
+#define OLDNREPLAYNAME
 
 //
 // MENUS
@@ -30,6 +36,9 @@
 #define MENUBITS 6
 
 // Menu IDs sectioned by numeric places to signify hierarchy
+/**
+ * IF YOU MODIFY THIS, MODIFY MENUTYPES_LIST[] IN dehacked.c TO MATCH.
+ */
 typedef enum
 {
 	MN_NONE,
@@ -57,13 +66,15 @@ typedef enum
 	MN_SP_NIGHTS_REPLAY,
 	MN_SP_NIGHTS_GHOST,
 
+	MN_SP_MARATHON,
+
 	// Multiplayer
 	MN_MP_MAIN,
 	MN_MP_SPLITSCREEN, // SplitServer
 	MN_MP_SERVER,
 	MN_MP_CONNECT,
 	MN_MP_ROOM,
-	MN_MP_PLAYERSETUP, // MP_PlayerSetupDef shared with SPLITSCREEN if #defined NONET
+	MN_MP_PLAYERSETUP,
 	MN_MP_SERVER_OPTIONS,
 
 	// Options
@@ -81,13 +92,13 @@ typedef enum
 	MN_OP_P2JOYSTICK,
 	MN_OP_P2CAMERA,
 
+	MN_OP_PLAYSTYLE,
+
 	MN_OP_VIDEO,
 	MN_OP_VIDEOMODE,
 	MN_OP_COLOR,
 	MN_OP_OPENGL,
 	MN_OP_OPENGL_LIGHTING,
-	MN_OP_OPENGL_FOG,
-	MN_OP_OPENGL_COLOR,
 
 	MN_OP_SOUND,
 
@@ -126,10 +137,13 @@ typedef enum
 	MN_SPECIAL,
 	NUMMENUTYPES,
 } menutype_t; // up to 63; MN_SPECIAL = 53
+#define MTREE2(a,b) (a | (b<<MENUBITS))
+#define MTREE3(a,b,c) MTREE2(a, MTREE2(b,c))
+#define MTREE4(a,b,c,d) MTREE2(a, MTREE3(b,c,d))
 
 typedef struct
 {
-	char bgname[8]; // name for background gfx lump; lays over titlemap if this is set
+	char bgname[8+1]; // name for background gfx lump; lays over titlemap if this is set
 	SINT8 fadestrength;  // darken background when displaying this menu, strength 0-31 or -1 for undefined
 	INT32 bgcolor; // fill color, overrides bg name. -1 means follow bg name rules.
 	INT32 titlescrollxspeed; // background gfx scroll per menu; inherits global setting
@@ -139,13 +153,13 @@ typedef struct
 	SINT8 hidetitlepics; // hide title gfx per menu; -1 means undefined, inherits global setting
 	ttmode_enum ttmode; // title wing animation mode; default TTMODE_OLD
 	UINT8 ttscale; // scale of title wing gfx (FRACUNIT / ttscale); -1 means undefined, inherits global setting
-	char ttname[9]; // lump name of title wing gfx. If name length is <= 6, engine will attempt to load numbered frames (TTNAMExx)
+	char ttname[8+1]; // lump name of title wing gfx. If name length is <= 6, engine will attempt to load numbered frames (TTNAMExx)
 	INT16 ttx; // X position of title wing
 	INT16 tty; // Y position of title wing
 	INT16 ttloop; // # frame to loop; -1 means dont loop
 	UINT16 tttics; // # of tics per frame
 
-	char musname[7]; ///< Music track to play. "" for no music.
+	char musname[6+1]; ///< Music track to play. "" for no music.
 	UINT16 mustrack; ///< Subsong to play. Only really relevant for music modules and specific formats supported by GME. 0 to ignore.
 	boolean muslooping; ///< Loop the music
 	boolean musstop; ///< Don't play any music
@@ -186,8 +200,8 @@ void M_Drawer(void);
 // Called by D_SRB2Main, loads the config file.
 void M_Init(void);
 
-// Called by D_SRB2Main also, sets up the playermenu and description tables.
-void M_InitCharacterTables(void);
+// Called by deh_soc.c, sets up the playermenu and description tables.
+void M_InitCharacterTables(INT32 num);
 
 // Called by intro code to force menu up upon a keypress,
 // does nothing if menu is already up.
@@ -214,6 +228,18 @@ typedef enum
 } menumessagetype_t;
 void M_StartMessage(const char *string, void *routine, menumessagetype_t itemtype);
 
+typedef enum
+{
+	M_NOT_WAITING,
+
+	M_WAITING_VERSION,
+	M_WAITING_ROOMS,
+	M_WAITING_SERVERS,
+}
+M_waiting_mode_t;
+
+extern M_waiting_mode_t m_waiting_mode;
+
 // Called by linux_x/i_video_xshm.c
 void M_QuitResponse(INT32 ch);
 
@@ -222,13 +248,14 @@ boolean M_CanShowLevelInList(INT32 mapnum, INT32 gt);
 
 // flags for items in the menu
 // menu handle (what we do when key is pressed
-#define IT_TYPE             14     // (2+4+8)
+#define IT_TYPE             15     // (1+2+4+8)
 #define IT_CALL              0     // call the function
+#define IT_SPACE             1     // no handling
 #define IT_ARROWS            2     // call function with 0 for left arrow and 1 for right arrow in param
 #define IT_KEYHANDLER        4     // call with the key in param
 #define IT_SUBMENU           6     // go to sub menu
 #define IT_CVAR              8     // handle as a cvar
-#define IT_SPACE            10     // no handling
+#define IT_PAIR             11     // no handling, define both sides of text
 #define IT_MSGHANDLER       12     // same as key but with event and sometime can handle y/n key (special for message)
 
 #define IT_DISPLAY   (48+64+128)    // 16+32+64+128
@@ -300,8 +327,11 @@ typedef struct menuitem_s
 	void *itemaction;
 
 	// hotkey in menu or y of the item
-	UINT8 alphaKey;
+	UINT16 alphaKey;
 } menuitem_t;
+
+extern menuitem_t MP_RoomMenu[];
+extern UINT32     roomIds[NUM_LIST_ROOMS];
 
 typedef struct menu_s
 {
@@ -319,6 +349,11 @@ typedef struct menu_s
 void M_SetupNextMenu(menu_t *menudef);
 void M_ClearMenus(boolean callexitmenufunc);
 
+// Maybe this goes here????? Who knows.
+boolean M_MouseNeeded(void);
+
+extern I_mutex m_menu_mutex;
+
 extern menu_t *currentMenu;
 
 extern menu_t MainDef;
@@ -332,29 +367,27 @@ extern menu_t OP_JoystickSetDef;
 typedef struct
 {
 	boolean used;
-	char notes[441];
-	char picname[8];
+	char notes[440+1];
+	char picname[8+1];
 	char skinname[SKINNAMESIZE*2+2]; // skin&skin\0
 	patch_t *charpic;
 	UINT8 prev;
 	UINT8 next;
-
-	// new character select
 	char displayname[SKINNAMESIZE+1];
-	SINT8 skinnum[2];
-	UINT8 oppositecolor;
-	char nametag[8];
+	INT16 skinnum[2];
+	UINT16 oppositecolor;
+	char nametag[8+1];
 	patch_t *namepic;
-	UINT8 tagtextcolor;
-	UINT8 tagoutlinecolor;
+	UINT16 tagtextcolor;
+	UINT16 tagoutlinecolor;
 } description_t;
 
 // level select platter
 typedef struct
 {
-	char header[22+5]; // mapheader_t lvltttl max length + " ZONE"
+	char header[22+5]; // mapheader_t lvlttl max length + " ZONE"
 	INT32 maplist[3];
-	char mapnames[3][17+1];
+	char mapnames[3][22]; // lvlttl max length
 	boolean mapavailable[4]; // mapavailable[3] == wide or not
 } levelselectrow_t;
 
@@ -371,6 +404,7 @@ typedef struct
 	UINT8 col[2];
 	char notes[441];
 } gtdesc_t;
+extern gtdesc_t gametypedesc[NUMGAMETYPES];
 
 // mode descriptions for video mode menu
 typedef struct
@@ -385,15 +419,17 @@ typedef struct
 {
 	char levelname[32];
 	UINT8 skinnum;
+	char skinname [SKINNAMESIZE+1];
 	UINT8 botskin;
 	UINT8 numemeralds;
 	UINT8 numgameovers;
 	INT32 lives;
-	INT32 continues;
+	INT32 continuescore;
 	INT32 gamemap;
 } saveinfo_t;
 
-extern description_t description[MAXSKINS];
+extern description_t *description;
+extern INT32 numdescriptions;
 
 extern consvar_t cv_showfocuslost;
 extern consvar_t cv_newgametype, cv_nextmap, cv_chooseskin, cv_serversort;
@@ -405,6 +441,7 @@ extern INT16 char_on, startchar;
 
 #define MAXSAVEGAMES 31
 #define NOSAVESLOT 0 //slot where Play Without Saving appears
+#define MARATHONSLOT 420 // just has to be nonzero, but let's use one that'll show up as an obvious error if something goes wrong while not using our existing saves
 
 #define BwehHehHe() S_StartSound(NULL, sfx_bewar1+M_RandomKey(4)) // Bweh heh he
 
@@ -428,6 +465,25 @@ void Addons_option_Onchange(void);
 
 // Moviemode menu updating
 void Moviemode_option_Onchange(void);
+
+// Player Setup menu colors linked list
+typedef struct menucolor_s {
+	struct menucolor_s *next;
+	struct menucolor_s *prev;
+	UINT16 color;
+} menucolor_t;
+
+extern menucolor_t *menucolorhead, *menucolortail;
+
+void M_AddMenuColor(UINT16 color);
+void M_MoveColorBefore(UINT16 color, UINT16 targ);
+void M_MoveColorAfter(UINT16 color, UINT16 targ);
+UINT16 M_GetColorBefore(UINT16 color);
+UINT16 M_GetColorAfter(UINT16 color);
+UINT16 M_GetColorIndex(UINT16 color);
+menucolor_t* M_GetColorFromIndex(UINT16 index);
+void M_InitPlayerSetupColors(void);
+void M_FreePlayerSetupColors(void);
 
 // These defines make it a little easier to make menus
 #define DEFAULTMENUSTYLE(id, header, source, prev, x, y)\
